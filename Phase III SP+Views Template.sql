@@ -233,7 +233,33 @@ create procedure place_order (
     in ip_dosage int
 )
 sp_main: begin
-	-- code here
+	if ip_orderNumber is not null and ip_priority is not null
+    and ip_patientId is not null and ip_doctorId is not null
+    and ip_cost is not null and ip_patientId in (select ssn from patient)
+    and ip_doctorId in (select ssn from doctor) and ip_orderNumber > 0 
+    and ip_orderNumber not in (select orderNumber from med_order)
+    and ip_cost >= 0
+    and ip_cost + (select outstanding_charges from outstanding_charges_view where ssn = ip_patientId) < (select funds from patient where ssn = ip_patientId)
+    and ip_priority >= 1 and ip_priority <= 5
+    then
+		if ip_labType is not null and
+        ip_drug is null and ip_dosage is null
+        then
+			insert into med_order (orderNumber, orderDate, priority, patientId, doctorId, cost) values
+            (ip_orderNumber, curdate(), ip_priority, ip_patientId, ip_doctorId, ip_cost);
+            insert into lab_work (orderNumber, labType) values
+            (ip_orderNumber, ip_labType);
+        end if;
+        if ip_labType is null and
+        ip_drug is not null and ip_dosage is not null
+        and ip_dosage > 0
+        then
+			insert into med_order (orderNumber, orderDate, priority, patientId, doctorId, cost) values
+            (ip_orderNumber, curdate(), ip_priority, ip_patientId, ip_doctorId, ip_cost);
+            insert into prescription (orderNumber, drug, dosage) values
+            (ip_orderNumber, ip_drug, ip_dosage);
+        end if;
+    end if;
 end /​/
 delimiter ;
 
@@ -295,7 +321,15 @@ create procedure assign_nurse_to_room (
     in ip_roomNumber integer
 )
 sp_main: begin
-	-- code here
+	if ip_nurseId is not null and ip_roomNumber is not null
+    and ip_nurseId in (select ssn from nurse)
+    and ip_roomNumber in (select roomNumber from room)
+    and (ip_nurseId, ip_roomNumber) not in (select nurseId, roomNumber from room_assignment)
+    and (select count(*) from room_assignment where nurseId = ip_nurseId group by nurseId) < 4
+    then
+		insert into room_assignment (nurseId, roomNumber) values
+        (ip_nurseId, ip_roomNumber);
+    end if;
 end /​/
 delimiter ;
 
@@ -358,7 +392,18 @@ create procedure manage_department (
     in ip_deptId int
 )
 sp_main: begin
-	-- code here
+	if ip_ssn is not null and ip_deptId is not null
+    and ip_ssn in (select ssn from staff)
+    and ip_deptId in (select deptId from department)
+    and ip_ssn not in (select manager from department)
+    and ip_ssn not in (select staffSsn from works_in natural join department where longName in
+    (select longName from department_view where staff_count = 1))
+    then
+		delete from works_in where staffSsn = ip_ssn;
+        insert into works_in (staffSsn, deptId) values
+        (ip_ssn, ip_deptId);
+        update department set manager = ip_ssn where deptId = ip_deptId;
+    end if;
 end /​/
 delimiter ;
 
@@ -517,7 +562,19 @@ create procedure remove_staff_from_dept (
     in ip_deptId integer
 )
 sp_main: begin
-	-- code here
+	if ip_ssn is not null and ip_deptId is not null
+    and ip_ssn in (select ssn from staff)
+    and ip_deptId in (select deptId from department)
+    and (ip_ssn, ip_deptId) in (select staffSsn, deptId from works_in)
+    and ip_ssn not in (select manager from department where deptId = ip_deptId)
+    and (select staff_count from department_view natural join department where deptId = ip_deptId) > 1
+    then
+		delete from works_in where staffSsn = ip_ssn and deptId = ip_deptId;
+        if ip_ssn not in (select staffSsn from works_in)
+        then
+			call remove_staff(ip_ssn);
+        end if;
+    end if;
 end /​/
 delimiter ;
 

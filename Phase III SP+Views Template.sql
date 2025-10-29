@@ -196,7 +196,13 @@ create procedure book_appointment (
 	in ip_apptCost integer
 )
 sp_main: begin
-	-- code here
+	if ip_patientId is not null and ip_apptDate is not null and ip_apptTime is not null and ip_apptCost is not null and ip_apptCost >= 0
+    and (ip_apptDate > CURDATE() or (ip_apptDate = CURDATE() and ip_apptTime > CURTIME()))
+    and exists (select 1 from patient where ssn = ip_patientId)
+    and not exists (select 1 from appointment where patientId = ip_patientId and apptDate = ip_apptDate and apptTime = ip_apptTime)
+    and (select funds from patient where ssn = ip_patientId) >= ip_apptCost + (select outstanding_charges from outstanding_charges_view where ssn = ip_patientId) then
+		insert into appointment values (ip_patientId, ip_apptDate, ip_apptTime, ip_apptCost);
+    end if;
 end /​/
 delimiter ;
 
@@ -304,7 +310,9 @@ create procedure add_funds (
     in ip_funds integer
 )
 sp_main: begin
-	-- code here
+	if ip_ssn is not null and ip_funds is not null and ip_funds > 0 and ip_ssn in (select ssn from patient) then
+        update patient set funds = funds + ip_funds where ssn = ip_ssn;
+	end if;
 end /​/
 delimiter ;
 
@@ -370,7 +378,13 @@ create procedure assign_doctor_to_appointment (
     in ip_doctorId char(11)
 )
 sp_main: begin
-	-- code here
+	if ip_patientId is not null and ip_apptDate is not null and ip_apptTime is not null and ip_doctorId is not null
+    and exists (select 1 from appointment where patientId = ip_patientId and apptDate = ip_apptDate and apptTime = ip_apptTime)
+    and exists (select 1 from doctor where ssn = ip_doctorId)
+    and (select count(*) from appt_assignment where patientId = ip_patientId and apptDate = ip_apptDate and apptTime = ip_apptTime) <= 3
+    and not exists (select 1 from appt_assignment where doctorId = ip_doctorId and apptDate = ip_apptDate and apptTime = ip_apptTime) then
+		insert into appt_assignment values (ip_patientId, ip_apptDate, ip_apptTime, ip_doctorId);
+	end if;
 end /​/
 delimiter ;
 
@@ -436,7 +450,16 @@ create procedure remove_patient (
 	in ip_ssn char(11)
 )
 sp_main: begin
-	-- code here
+	if ip_ssn is not null
+    and exists (select 1 from patient where ssn = ip_ssn)
+    and not exists (select 1 from appointment where patientId = ip_ssn)
+    and not exists (select 1 from med_order where patientId = ip_ssn) then
+		delete from patient where ssn = ip_ssn;
+        if not exists (select 1 from staff where ssn = ip_ssn) then
+			delete from person where ssn = ip_ssn;
+        end if;
+        update room set occupiedBy = null where occupiedBy = ip_ssn;
+    end if;
 end /​/
 delimiter ;
 
@@ -612,6 +635,18 @@ create procedure complete_orders (
 	in ip_num_orders integer
 )
 sp_main: begin
-	-- code here
+	declare counter int default 0;
+    declare orderNum int;
+    declare orderCost int;
+    declare orderPssn char(11);
+	if ip_num_orders is null or ip_num_orders <= 0 then leave sp_main; end if;
+    repeat
+		select orderNumber, cost, patientId into orderNum, orderCost, orderPssn from med_order order by priority desc, orderDate asc limit 1;
+        if orderNum is null then leave sp_main; end if;
+        update patient set funds = funds - orderCost where ssn = orderPssn;
+        delete from med_order where orderNumber = orderNum;
+        set counter = counter + 1;
+	until counter >= ip_num_orders
+    end repeat;
 end /​/
 delimiter ;

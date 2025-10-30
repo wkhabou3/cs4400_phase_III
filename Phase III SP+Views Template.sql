@@ -138,11 +138,13 @@ create procedure add_patient (
     in ip_contact char(12)
 )
 sp_main: begin
+	-- Check: Args are not null, ssn not already in patient table
 	if (ip_ssn is not null and ip_first_name is not null
     and ip_last_name is not null and ip_birthdate is not null
     and ip_address is not null and ip_funds is not null
     and ip_contact is not null) and (ip_ssn not in (select ssn from patient))
     then
+		-- If ssn not in person table, insert into person first
 		if ip_ssn not in (select ssn from person)
         then
 			insert into person (ssn, firstName, lastName, birthdate, address) values
@@ -239,6 +241,7 @@ create procedure place_order (
     in ip_dosage int
 )
 sp_main: begin
+	-- Check: Args not null; patientId and doctorId exist; orderNumber unique; orderNumber positive; cost nonnegative; cost + outstanding charge < funds; priority between 1 and 5
 	if ip_orderNumber is not null and ip_priority is not null
     and ip_patientId is not null and ip_doctorId is not null
     and ip_cost is not null and ip_patientId in (select ssn from patient)
@@ -248,6 +251,7 @@ sp_main: begin
     and ip_cost + (select outstanding_charges from outstanding_charges_view where ssn = ip_patientId) < (select funds from patient where ssn = ip_patientId)
     and ip_priority >= 1 and ip_priority <= 5
     then
+		-- Check if order is a lab_work. Insert into order and lab_work
 		if ip_labType is not null and
         ip_drug is null and ip_dosage is null
         then
@@ -256,6 +260,8 @@ sp_main: begin
             insert into lab_work (orderNumber, labType) values
             (ip_orderNumber, ip_labType);
         end if;
+        
+        -- Check if orrder is a prescription, and that the dosage is positive. Inssert into order and prescription
         if ip_labType is null and
         ip_drug is not null and ip_dosage is not null
         and ip_dosage > 0
@@ -329,17 +335,20 @@ create procedure assign_nurse_to_room (
     in ip_roomNumber integer
 )
 sp_main: begin
+	-- Check: no args are null, nurseId and roomNumber exist, assignment doesn't already exist, less than three assignments for nurse
 	if ip_nurseId is not null and ip_roomNumber is not null
     and ip_nurseId in (select ssn from nurse)
     and ip_roomNumber in (select roomNumber from room)
     and (ip_nurseId, ip_roomNumber) not in (select nurseId, roomNumber from room_assignment)
-    and (select count(*) from room_assignment where nurseId = ip_nurseId group by nurseId) < 4
+    and ((select count(nurseId) from room_assignment where nurseId = ip_nurseId group by nurseId) < 4
+    or ip_nurseId not in (select nurseId from room_assignment))
     then
 		insert into room_assignment (nurseId, roomNumber) values
         (ip_nurseId, ip_roomNumber);
     end if;
 end /​/
 delimiter ;
+-- Test: nurse not assigned to any rooms,
 
 -- [13] assign_room_to_patient()
 -- -----------------------------------------------------------------------------
@@ -406,20 +415,24 @@ create procedure manage_department (
     in ip_deptId int
 )
 sp_main: begin
+-- Check: args are not null, ssn and department exist, ssn is not a manager, ssn does not work in any departments as the sole employee
 	if ip_ssn is not null and ip_deptId is not null
     and ip_ssn in (select ssn from staff)
     and ip_deptId in (select deptId from department)
     and ip_ssn not in (select manager from department)
     and ip_ssn not in (select staffSsn from works_in natural join department where longName in
-    (select longName from department_view where staff_count = 1))
+    (select longName from department_view where staff_count = 1) and deptId != ip_deptId)
     then
+		-- Delete ssn from all departments
 		delete from works_in where staffSsn = ip_ssn;
+        -- Reinstate ssn into input department and set them to manager of dept
         insert into works_in (staffSsn, deptId) values
         (ip_ssn, ip_deptId);
         update department set manager = ip_ssn where deptId = ip_deptId;
     end if;
 end /​/
 delimiter ;
+-- Test: ssn works as sole employee of any dept, ssn set as manager but not in works_in table (is this even possible)
 
 -- [16] release_room()
 -- -----------------------------------------------------------------------------
@@ -585,6 +598,7 @@ create procedure remove_staff_from_dept (
     in ip_deptId integer
 )
 sp_main: begin
+	-- Check: No args are null, ssn and deptId exist, employee works in dept, ssn not manager of this dept, dept has more than 1 employee
 	if ip_ssn is not null and ip_deptId is not null
     and ip_ssn in (select ssn from staff)
     and ip_deptId in (select deptId from department)
@@ -592,7 +606,9 @@ sp_main: begin
     and ip_ssn not in (select manager from department where deptId = ip_deptId)
     and (select staff_count from department_view natural join department where deptId = ip_deptId) > 1
     then
+		-- Remove staff/dept relationship from works_in
 		delete from works_in where staffSsn = ip_ssn and deptId = ip_deptId;
+        -- If staff no longer working for any departments, then call remove_staff
         if ip_ssn not in (select staffSsn from works_in)
         then
 			call remove_staff(ip_ssn);

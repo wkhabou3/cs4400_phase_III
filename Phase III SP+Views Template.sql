@@ -390,7 +390,7 @@ sp_main: begin
 	if ip_patientId is not null and ip_apptDate is not null and ip_apptTime is not null and ip_doctorId is not null
     and exists (select 1 from appointment where patientId = ip_patientId and apptDate = ip_apptDate and apptTime = ip_apptTime)
     and exists (select 1 from doctor where ssn = ip_doctorId)
-    and (select count(*) from appt_assignment where patientId = ip_patientId and apptDate = ip_apptDate and apptTime = ip_apptTime) <= 3
+    and (select count(*) from appt_assignment where patientId = ip_patientId and apptDate = ip_apptDate and apptTime = ip_apptTime) < 3
     and not exists (select 1 from appt_assignment where doctorId = ip_doctorId and apptDate = ip_apptDate and apptTime = ip_apptTime) then
 		insert into appt_assignment values (ip_patientId, ip_apptDate, ip_apptTime, ip_doctorId);
 	end if;

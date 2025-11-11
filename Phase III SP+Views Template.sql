@@ -174,6 +174,11 @@ create procedure record_symptom (
 )
 sp_main: begin
 	-- code here
+	if ip_patientId is null or ip_numDays is null or ip_apptDate is null or ip_apptTime is null or 
+    ip_symptomType is null then leave sp_main;
+    end if;
+    update symptom set symptomType = ip_symptomType where patientId = ip_patientId and apptDate = ip_apptDate
+    and apptTime = ip_apptTime and (symptomType is null or symptomType != ip_symptomType);
 end /​/
 delimiter ;
 
@@ -300,6 +305,24 @@ create procedure add_staff_to_dept (
 )
 sp_main: begin
 	-- code here
+	    -- check if null
+    if ip_deptId is null or ip_ssn is null or ip_firstName is null or ip_lastName is null or ip_birthdate is null
+    or ip_startdate is null or ip_address is null or ip_staffId is null or ip_salary is null then leave sp_main;
+    end if;
+    -- check for valid dept
+    if not exists (select 1 from works_in where deptId = ip_deptId) then leave sp_main; end if;
+    
+    -- if emp not exists we need to add to tables (need to check is not in person)
+    if not exists (select 1 from staff where ssn = ip_ssn) then 
+    insert into person(ssn, firstName, lastName, birthdate, address) 
+    values(ip_ssn, ip_firstName, ip_lastName, ip_birthdate, ip_address);
+    insert into staff(ssn, staffId, hireDate, salary) values (ip_ssn, ip_staffId, ip_startdate, ip_salary);
+    insert into works_in(staffSsn, deptId) values (ip_ssn, ip_deptId);
+    leave sp_main; end if;
+    
+    -- if emp in works_in we update the table entry
+    if exists (select 1 from works_in where staffSsn = ip_ssn) then
+    update works_in set deptId = ip_deptId where staffSsn = ip_ssn; end if;
 end /​/
 delimiter ;
 
@@ -368,6 +391,11 @@ create procedure assign_room_to_patient (
 )
 sp_main: begin
     -- code here
+	if ip_ssn is null or ip_roomNumber is null or ip_roomType is null then leave sp_main; end if;
+    -- loop thru rows with occupiedBy = ip_ssn and delete occupiedBy/set to null
+    -- then find room where roomNumber = ip_roomNumber and ip_roomType = roomType and set occupiedBy = ip_ssn
+    update room set occupiedBy = null where occupiedBy = ip_ssn;
+    update room set occupiedBy = ip_ssn where roomType = ip_roomType and occupiedBy is null;
 end /​/
 delimiter ;
 
@@ -446,6 +474,8 @@ create procedure release_room (
 )
 sp_main: begin
 	-- code here
+	 if ip_roomNumber is null then leave sp_main; end if;
+    update room set occupiedBy = null where roomNumber = ip_roomNumber;
 end /​/
 delimiter ;
 
@@ -633,6 +663,10 @@ create procedure complete_appointment (
 )
 sp_main: begin
 	-- code here
+	if ip_patientId is null or ip_apptDate is null or ip_apptTime is null then leave sp_main; end if;
+    update patient set funds= funds-cost where patientId = ip_patientId;
+    delete from appointment where patientId = ip_patientId and ip_apptDate = apptDate and ip_apptTime = apptTime;
+    
 end /​/
 delimiter ;
 

@@ -175,10 +175,13 @@ create procedure record_symptom (
 sp_main: begin
 	-- code here
 	if ip_patientId is null or ip_numDays is null or ip_apptDate is null or ip_apptTime is null or 
-    ip_symptomType is null then leave sp_main;
+    ip_symptomType is null or not exists(select 1 from appointment where ip_patientId = patientId 
+    and apptDate = ip_apptDate and apptTime = ip_apptTime) or exists(select 1 from symptom
+    where patientId = ip_patientId and numDays = ip_numDays and apptDate = ip_apptDate
+    and apptTime = ip_apptTime and symptomType = ip_symptomType) then leave sp_main;
     end if;
-    update symptom set symptomType = ip_symptomType where patientId = ip_patientId and apptDate = ip_apptDate
-    and apptTime = ip_apptTime and (symptomType is null or symptomType != ip_symptomType);
+    insert into symptom (symptomType, numDays, patientId, apptDate, apptTime) values
+    (ip_symptomType, ip_numDays, ip_patientId, ip_apptDate, ip_apptTime);
 end /​/
 delimiter ;
 
@@ -266,7 +269,7 @@ sp_main: begin
             (ip_orderNumber, ip_labType);
         end if;
         
-        -- Check if orrder is a prescription, and that the dosage is positive. Inssert into order and prescription
+        -- Check if order is a prescription, and that the dosage is positive. Insert into order and prescription
         if ip_labType is null and
         ip_drug is not null and ip_dosage is not null
         and ip_dosage > 0
@@ -310,19 +313,22 @@ sp_main: begin
     or ip_startdate is null or ip_address is null or ip_staffId is null or ip_salary is null then leave sp_main;
     end if;
     -- check for valid dept
-    if not exists (select 1 from works_in where deptId = ip_deptId) then leave sp_main; end if;
+    if not exists (select 1 from department where deptId = ip_deptId) then leave sp_main; end if;
     
     -- if emp not exists we need to add to tables (need to check is not in person)
     if not exists (select 1 from staff where ssn = ip_ssn) then 
-    insert into person(ssn, firstName, lastName, birthdate, address) 
+    if not exists (select 1 from person where ssn = ip_ssn) then
+    insert into person(ssn, firstName, lastName, birthdate, address)
     values(ip_ssn, ip_firstName, ip_lastName, ip_birthdate, ip_address);
+    end if;
     insert into staff(ssn, staffId, hireDate, salary) values (ip_ssn, ip_staffId, ip_startdate, ip_salary);
     insert into works_in(staffSsn, deptId) values (ip_ssn, ip_deptId);
     leave sp_main; end if;
     
-    -- if emp in works_in we update the table entry
-    if exists (select 1 from works_in where staffSsn = ip_ssn) then
-    update works_in set deptId = ip_deptId where staffSsn = ip_ssn; end if;
+    -- if emp exists and does not manage another dept we simply add to works_in if needed
+    if not exists (select 1 from works_in where staffSsn = ip_ssn and deptId = ip_deptId)
+    and ip_ssn not in (select manager from department where deptId != ip_deptId) then
+    insert into works_in (staffSsn, deptId) values (ip_ssn, ip_deptId); end if;
 end /​/
 delimiter ;
 
@@ -391,11 +397,13 @@ create procedure assign_room_to_patient (
 )
 sp_main: begin
     -- code here
-	if ip_ssn is null or ip_roomNumber is null or ip_roomType is null then leave sp_main; end if;
+	if ip_ssn is null or ip_roomNumber is null or ip_roomType is null or ip_ssn not in (select ssn from patient) 
+    or not exists(select 1 from room where roomNumber = ip_roomNumber and roomType = ip_roomType)
+    or (select occupiedBy from room where roomNumber = ip_roomNumber) is not null then leave sp_main; end if;
     -- loop thru rows with occupiedBy = ip_ssn and delete occupiedBy/set to null
     -- then find room where roomNumber = ip_roomNumber and ip_roomType = roomType and set occupiedBy = ip_ssn
     update room set occupiedBy = null where occupiedBy = ip_ssn;
-    update room set occupiedBy = ip_ssn where roomType = ip_roomType and occupiedBy is null;
+    update room set occupiedBy = ip_ssn where roomNumber = ip_roomNumber;
 end /​/
 delimiter ;
 
@@ -474,7 +482,7 @@ create procedure release_room (
 )
 sp_main: begin
 	-- code here
-	 if ip_roomNumber is null then leave sp_main; end if;
+	 if ip_roomNumber is null or ip_roomNumber not in (select roomNumber from room) then leave sp_main; end if;
     update room set occupiedBy = null where roomNumber = ip_roomNumber;
 end /​/
 delimiter ;
@@ -663,8 +671,11 @@ create procedure complete_appointment (
 )
 sp_main: begin
 	-- code here
-	if ip_patientId is null or ip_apptDate is null or ip_apptTime is null then leave sp_main; end if;
-    update patient set funds= funds-cost where patientId = ip_patientId;
+    declare appt_cost int;
+	if ip_patientId is null or ip_apptDate is null or ip_apptTime is null or not exists(select 1 from appointment where
+    patientId = ip_patientId and apptDate = ip_apptDate and apptTime = ip_apptTime) then leave sp_main; end if;
+    select cost into appt_cost from appointment where patientId = ip_patientId and apptDate = ip_apptDate and apptTime = ip_apptTime;
+    update patient set funds = funds - appt_cost where ssn = ip_patientId;
     delete from appointment where patientId = ip_patientId and ip_apptDate = apptDate and ip_apptTime = apptTime;
     
 end /​/

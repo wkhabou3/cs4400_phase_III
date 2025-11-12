@@ -29,16 +29,13 @@ of assigned doctor and assigned nurse.*/
 create or replace view room_wise_view as
 select p.firstName as patient_fname, p.lastName as patient_lname, roomNumber, longName,
 d.firstName as doctor_fname, d.lastName as doctor_lname,
-n.firstName as nurse_fname, n.lastName as nurse_lname from patient p2
-join person p on p2.ssn = p.ssn
+n.firstName as nurse_fname, n.lastName as nurse_lname from patient p
 join room on p.ssn = occupiedBy
 left join department on managingDept = deptId
 left join appt_assignment on p.ssn = patientId
-left join doctor d2 on doctorId = d2.ssn
-left join person d on d2.ssn = d.ssn
+left join person d on doctorId = d.ssn
 natural join room_assignment
-left join nurse n2 on nurseId = n2.ssn
-left join person n on n2.ssn = n.ssn;
+left join person n on nurseId = n.ssn;
 
 -- [2] symptoms_overview_view()
 -- -----------------------------------------------------------------------------
@@ -256,7 +253,7 @@ sp_main: begin
     and ip_doctorId in (select ssn from doctor) and ip_orderNumber > 0 
     and ip_orderNumber not in (select orderNumber from med_order)
     and ip_cost >= 0
-    and ip_cost + (select outstanding_charges from outstanding_charges_view where ssn = ip_patientId) < (select funds from patient where ssn = ip_patientId)
+    and ip_cost + (select outstanding_charges from outstanding_charges_view where ssn = ip_patientId) <= (select funds from patient where ssn = ip_patientId)
     and ip_priority >= 1 and ip_priority <= 5
     then
 		-- Check if order is a lab_work. Insert into order and lab_work
@@ -310,20 +307,21 @@ sp_main: begin
 	-- code here
 	    -- check if null
     if ip_deptId is null or ip_ssn is null or ip_firstName is null or ip_lastName is null or ip_birthdate is null
-    or ip_startdate is null or ip_address is null or ip_staffId is null or ip_salary is null then leave sp_main;
+	or ip_startdate is null or ip_address is null or ip_staffId is null or ip_salary is null then leave sp_main;
     end if;
     -- check for valid dept
     if not exists (select 1 from department where deptId = ip_deptId) then leave sp_main; end if;
     
     -- if emp not exists we need to add to tables (need to check is not in person)
     if not exists (select 1 from staff where ssn = ip_ssn) then 
-    if not exists (select 1 from person where ssn = ip_ssn) then
-    insert into person(ssn, firstName, lastName, birthdate, address)
-    values(ip_ssn, ip_firstName, ip_lastName, ip_birthdate, ip_address);
-    end if;
-    insert into staff(ssn, staffId, hireDate, salary) values (ip_ssn, ip_staffId, ip_startdate, ip_salary);
-    insert into works_in(staffSsn, deptId) values (ip_ssn, ip_deptId);
-    leave sp_main; end if;
+		if not exists (select 1 from person where ssn = ip_ssn) then
+			insert into person(ssn, firstName, lastName, birthdate, address)
+			values(ip_ssn, ip_firstName, ip_lastName, ip_birthdate, ip_address);
+		end if;
+		insert into staff(ssn, staffId, hireDate, salary) values (ip_ssn, ip_staffId, ip_startdate, ip_salary);
+		insert into works_in(staffSsn, deptId) values (ip_ssn, ip_deptId);
+		leave sp_main; 
+	end if;
     
     -- if emp exists and does not manage another dept we simply add to works_in if needed
     if not exists (select 1 from works_in where staffSsn = ip_ssn and deptId = ip_deptId)
@@ -369,8 +367,7 @@ sp_main: begin
     and ip_nurseId in (select ssn from nurse)
     and ip_roomNumber in (select roomNumber from room)
     and (ip_nurseId, ip_roomNumber) not in (select nurseId, roomNumber from room_assignment)
-    and ((select count(nurseId) from room_assignment where nurseId = ip_nurseId group by nurseId) < 4
-    or ip_nurseId not in (select nurseId from room_assignment))
+    and ((select count(*) from room_assignment where nurseId = ip_nurseId group by nurseId) < 4)
     then
 		insert into room_assignment (nurseId, roomNumber) values
         (ip_nurseId, ip_roomNumber);
@@ -482,7 +479,7 @@ create procedure release_room (
 )
 sp_main: begin
 	-- code here
-	 if ip_roomNumber is null or ip_roomNumber not in (select roomNumber from room) then leave sp_main; end if;
+	if ip_roomNumber is null or ip_roomNumber not in (select roomNumber from room) then leave sp_main; end if;
     update room set occupiedBy = null where roomNumber = ip_roomNumber;
 end /​/
 delimiter ;
